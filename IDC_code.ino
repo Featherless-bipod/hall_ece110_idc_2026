@@ -93,6 +93,7 @@ return 0;
 int score_arr[5] = {-1,-1,-1,-1,-1}; 
 
 void display(){
+  
   String text = "[";
   for (int i = 0; i < 5; i++){
     text += score_arr[i];
@@ -119,12 +120,10 @@ void process_incoming(char in){
   int team_num = code / 10 - 5;
   int team_score = code % 10;
   score_arr[team_num] = team_score;
-  display();
 }
 
 void read_xbee(){
-  while (!scoresFilled()){
-    if(Serial2.available()){
+  while (Serial2.available()){
     char incoming = Serial2.read();
     set_ex_RGB(255,255,255);
     delay(250);
@@ -132,7 +131,6 @@ void read_xbee(){
     Serial.print("incoming: ");
     Serial.println((char)incoming);
     process_incoming(incoming);
-    }
   }
 }
 
@@ -149,6 +147,31 @@ void broken() {
 servoLeft.detach();
 servoRight.detach();
 }
+
+void finish_state() {
+  servoLeft.detach();
+  servoRight.detach();
+  set_RGBi(255, 255, 255);
+  scan_hall();
+
+  int error_status = report_values();
+  delay(250);
+  set_RGBi(0,0,0);
+  Serial.println("Error status: ");
+  Serial.println(error_status);
+  servoLeft.detach();
+  servoRight.detach();
+  display();
+  while(!scoresFilled()){
+    read_xbee();
+    display();
+  }
+  while(true){
+    delay(1000); 
+  }
+}
+
+
 //function called for when meeting a hash
 void stop() {
 //increase count of hash everytime reaching one
@@ -174,17 +197,7 @@ switch (count) {
     scan_hall();
     break;
   case 5:
-    set_RGBi(255, 255, 255);
-    scan_hall();
-    
-    int error_status = report_values();
-    delay(250);
-    set_RGBi(0,0,0);
-    Serial.println("Error status: ");
-    Serial.println(error_status);
-    servoLeft.detach();
-    servoRight.detach();
-    read_xbee();
+    finish_state();
 }
 delay(1000);
 //return RGB to having no color
@@ -304,6 +317,7 @@ switch (state) {
     broken();
     break;
 }
+read_xbee();
 
 //if(!scoresFilled()) read_xbee();
 
