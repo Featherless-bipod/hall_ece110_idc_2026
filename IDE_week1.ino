@@ -1,6 +1,3 @@
-HELLLOOOOO my goat
-
-
 #include <Servo.h>
 
 //Pins for QTI connections on board
