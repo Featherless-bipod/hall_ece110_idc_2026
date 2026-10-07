@@ -14,6 +14,9 @@
 #define ex_greenpin 3
 #define ex_bluepin 2
 
+
+//============================================= WEEK 2 CODE =========================================================
+
 //define team
 const int team_int = 80;
 
@@ -78,9 +81,52 @@ Serial2.flush();
  Serial2.print(char(val));
  Serial.println(char(val));
  set_ex_RGB(0,0,0);
+process_incoming(val);
 return 0;
 }
 
+
+///===================================================== WEEK 3 CODE ==========================================================
+int score_arr[5] = {-1,-1,-1,-1,-1}; 
+
+void display(){
+  String text = "[";
+  for (int i = 0; i < 5; i++){
+    text += score_arr[i];
+    if (i < 4) text += " ";
+  }
+  text += "]";
+  mySerial.write(12);
+  delay(10);
+  mySerial.write(22);
+  delay(10);
+  mySerial.print(text);
+}
+
+bool scoresFilled(){
+  for(int i  = 0; i < 5; i++){
+    if(score_arr[i] <0) return false;
+  }
+  return true;
+}
+
+void process_incoming(char in){
+  int team_num = in/10 - 5;
+  int team_score = in%10; 
+  score_arr[team_num] = team_score;
+  display();
+}
+
+void read_xbee(){
+  if(Serial2.availiable()){
+    char incoming = Serial.read)();
+    Serial.print("incoming:");
+    Serial.println(incoming);
+    process_incoming(incoming);
+  }
+}
+
+//==================================================== WEEK 1 CODE ======================================================
 //function for when needing to wait for a certain amount of time not moving
 void wait(int time) {
 servoLeft.writeMicroseconds(1500);
@@ -120,6 +166,7 @@ switch (count) {
   case 5:
     set_RGBi(255, 255, 255);
     scan_hall();
+    
     int error_status = report_values();
     Serial.println("Error status: ");
     Serial.println(error_status);
@@ -239,6 +286,9 @@ switch (state) {
     broken();
     break;
 }
+
+if(!scoresFilled()) read_xbee();
+
 }
 
 
