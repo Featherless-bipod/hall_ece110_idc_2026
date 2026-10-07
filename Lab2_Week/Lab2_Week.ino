@@ -1,4 +1,5 @@
 #include <Servo.h>
+#include <SoftwareSerial.h>
 
 //Pins for QTI connections on board
 #define lineSensor1 47  // Left
@@ -14,6 +15,8 @@
 #define ex_greenpin 3
 #define ex_bluepin 2
 
+#define TxPin 14
+SoftwareSerial mySerial = SoftwareSerial(255, TxPin); 
 
 //============================================= WEEK 2 CODE =========================================================
 
@@ -111,18 +114,25 @@ bool scoresFilled(){
 }
 
 void process_incoming(char in){
-  int team_num = in/10 - 5;
-  int team_score = in%10; 
+  char code = in;
+  if (code < 50 || code > 99) return;   // ignore garbage
+  int team_num = code / 10 - 5;
+  int team_score = code % 10;
   score_arr[team_num] = team_score;
   display();
 }
 
 void read_xbee(){
-  if(Serial2.availiable()){
-    char incoming = Serial.read)();
-    Serial.print("incoming:");
-    Serial.println(incoming);
+  while (!scoresFilled()){
+    if(Serial2.available()){
+    char incoming = Serial2.read();
+    set_ex_RGB(255,255,255);
+    delay(250);
+    set_ex_RGB(0,0,0);
+    Serial.print("incoming: ");
+    Serial.println((char)incoming);
     process_incoming(incoming);
+    }
   }
 }
 
@@ -168,10 +178,13 @@ switch (count) {
     scan_hall();
     
     int error_status = report_values();
+    delay(250);
+    set_RGBi(0,0,0);
     Serial.println("Error status: ");
     Serial.println(error_status);
     servoLeft.detach();
     servoRight.detach();
+    read_xbee();
 }
 delay(1000);
 //return RGB to having no color
@@ -211,8 +224,13 @@ servoRight.writeMicroseconds(1450);
 
 //setup block
 void setup() {
+
 Serial.begin(9600);
 Serial2.begin(9600);
+mySerial.begin(9600);
+mySerial.write(12);
+mySerial.write(18);
+mySerial.write(22);
 servoLeft.attach(12);
 servoRight.attach(11);
 
@@ -287,7 +305,7 @@ switch (state) {
     break;
 }
 
-if(!scoresFilled()) read_xbee();
+//if(!scoresFilled()) read_xbee();
 
 }
 
