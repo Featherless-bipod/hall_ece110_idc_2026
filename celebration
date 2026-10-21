@@ -1,0 +1,459 @@
+// IDC Checkpoint 1: line following + stop and flash on-board RGB LED at each hash
+// Hash colors: 1 Purple, 2 Green, 3 Blue, 4 Red, 5 White. Stop permanently after hash 5.
+// After hash 5 the bot parks, keeps re-sending its own score, and keeps listening
+// for scores from other groups (so late finishers are still received).
+
+#include <Servo.h>
+#include <SoftwareSerial.h>
+#define TxPin 14
+
+SoftwareSerial mySerial = SoftwareSerial(255, TxPin);
+
+Servo servoLeft;
+Servo servoRight;
+
+const int red = 4;
+const int green = 3;
+const int blue = 2;
+
+// QTI pins (left to right)
+#define lineSensor1 47  // far left
+#define lineSensor2 51  // middle
+#define lineSensor3 52  // right
+
+
+// On-board RGB LED pins
+#define redpin 45
+#define greenpin 46
+#define bluepin 44
+
+
+// QTI thresholds (decay time in microseconds).
+// Short decay = light surface. Below threshold -> 1 (light), above -> 0 (dark).
+const long THRESH1 = 270;
+const long THRESH2 = 320;
+const long THRESH3 = 270;
+
+
+const int FLASH_TIME = 500;  // ms, must be between 250 and 1000
+
+
+int hash = 0;  // number of hash marks reached so far
+
+
+int rfidCount = 0;          // number of RFID cards detected
+const int RFID_WAIT = 500;  // ms to wait for a card at each hash
+
+
+int results[5] = { -1, -1, -1, -1, -1 };  // one score per group, -1 = not received yet
+
+
+// ---------- Function prototypes ----------
+int readState();
+bool isLight(long qti, long threshold);
+long rcTime(int pin);
+void handleHash();
+void finishAndListen();
+bool checkRFID();
+void clearRFIDBuffer();
+void showHashColor(int n);
+void setColor(int r, int g, int b);
+void setColor2(int r, int g, int b);
+void ledOff();
+void ledOff2();
+void botStraight();
+void botLeft();
+void botHardLeft();
+void botRight();
+void botHardRight();
+void botStop();
+void botDetach();
+void transmit_func(int count);
+void display(int results[]);
+bool scoresFilled();
+
+
+void setup() {
+  servoLeft.attach(11);
+  servoRight.attach(12);
+
+
+  pinMode(redpin, OUTPUT);
+  pinMode(greenpin, OUTPUT);
+  pinMode(bluepin, OUTPUT);
+
+
+  pinMode(red, OUTPUT);
+  pinMode(green, OUTPUT);
+  pinMode(blue, OUTPUT);
+
+
+  ledOff();
+  ledOff2();
+
+
+  Serial1.begin(9600);   // connect to the serial port for the RFID reader
+  mySerial.begin(9600);  // LCD
+  Serial.begin(9600);
+
+
+  Serial2.begin(9600);  // send/receive data with the other bots
+}
+
+void loop() {
+  int state = readState();
+  Serial.println("state: " + String(state));
+
+  switch (state) {
+    case 0:  // D D D: hash mark
+      handleHash();
+      break;
+    case 5:  // L D L: centered on line
+      botStraight();
+      break;
+    case 1:  // D D L: line drifting left
+      botLeft();
+      break;
+    case 3:  // D L L: line far left
+      botHardLeft();
+      break;
+    case 4:  // L D D: line drifting right
+      botRight();
+      break;
+    case 6:  // L L D: line far right
+      botHardRight();
+      break;
+    default:  // 2 (D L D, unlikely) or 7 (L L L, off the line)
+      botStop();
+      Serial.println("Unknown state - stopping");
+      break;
+  }
+}
+
+// ---------- Sensing ----------
+
+// Reads all three QTIs and combines them into one number (0-7).
+// Left sensor is the most significant bit.
+int readState() {
+  bool sLeft = isLight(rcTime(lineSensor1), THRESH1);
+  bool sMiddle = isLight(rcTime(lineSensor2), THRESH2);
+  bool sRight = isLight(rcTime(lineSensor3), THRESH3);
+  return 4 * sLeft + 2 * sMiddle + sRight;
+}
+
+// Returns 1 if the surface is light (fast decay), 0 if dark (slow decay).
+bool isLight(long qti, long threshold) {
+  return qti < threshold;
+}
+
+// Measures QTI capacitor decay time.
+long rcTime(int pin) {
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, HIGH);  // charge the capacitor
+  delay(1);
+  pinMode(pin, INPUT);
+  digitalWrite(pin, LOW);
+  long time = micros();
+  while (digitalRead(pin))
+    ;  // wait while voltage is high
+  time = micros() - time;
+  return time;
+}
+
+// ---------- Hash handling ----------
+
+void handleHash() {
+  botStop();
+  hash++;
+  Serial.println("Hash #" + String(hash));
+
+  // On-board LED: hash color
+  showHashColor(hash);
+  delay(FLASH_TIME);
+  ledOff();
+
+  // Check for an RFID card at this hash
+  bool found = checkRFID();
+  if (found) {
+    rfidCount++;
+    setColor2(0, 255, 0);  // external LED green = object detected
+    Serial.println("Card found. Count = " + String(rfidCount));
+  } else {
+    setColor2(255, 0, 0);  // external LED red = no object
+    Serial.println("No card");
+  }
+  delay(250);
+  ledOff2();
+
+
+  // Last hash: park the bot, then listen and transmit forever.
+  if (hash >= 5) {
+    botDetach();
+    results[0] = rfidCount;  // our own score
+    finishAndListen();       // never returns
+  }
+
+
+  // Drive forward until the QTIs are off the hash,
+  // so the same hash mark is not counted twice.
+  botStraight();
+  while (readState() == 0) {
+  }
+  delay(100);
+
+
+  // Throw away any stale RFID bytes so they don't count at the next hash
+  clearRFIDBuffer();
+}
+
+// Runs forever after the last hash.
+// Re-sends our score about once per second and collects scores from other groups.
+// Runs forever after the last hash.
+// Sends our score ONCE, then just listens for scores from other groups.
+// Runs forever after the last hash.
+// Sends our score ONCE, then just listens for scores from other groups.
+void finishAndListen() {
+  results[0] = rfidCount;  // raw number of dinosaurs we counted
+
+  //Flash RGB blue once it transmits data
+  setColor2(0, 255, 0);
+  transmit_func(rfidCount);  // send total count once
+  delay(250);
+  ledOff2();
+
+  display(results);
+
+  while (true) {
+    bool changed = false;
+    bool receivedData = false;
+    while (Serial2.available() > 0) {
+      int received_char = int(Serial2.read());
+      receivedData = true;
+      int group_num = received_char / 10 - 5;
+
+      // group_num > 0: never let incoming data overwrite our own score (index 0)
+      if (group_num > 0 && group_num < 5) {
+        int dino_num = received_char % 10;
+        if (results[group_num] != dino_num) {
+          results[group_num] = dino_num;
+          changed = true;
+        }
+      }
+    }
+
+    if (receivedData) {  // Flash white RGB when it receives data
+      setColor2(255, 255, 255);
+      delay(250);
+      ledOff2();
+    }
+
+    if (changed) {
+      display(results);
+    }
+
+    delay(10);
+  }
+}
+
+// ---------- RFID ----------
+
+// Waits up to RFID_WAIT ms for the reader to send anything.
+// Any data at all means a card is present.
+bool checkRFID() {
+  unsigned long start = millis();
+  while (millis() - start < RFID_WAIT) {
+    if (Serial1.available() > 0) {
+      delay(50);  // let the rest of the 16-byte packet arrive
+      clearRFIDBuffer();
+      return true;
+    }
+  }
+  return false;  // timed out: no card
+}
+
+// Empties the serial buffer from the RFID reader.
+void clearRFIDBuffer() {
+  while (Serial1.available() > 0) {
+    Serial1.read();
+  }
+}
+
+// ---------- LEDs ----------
+
+void showHashColor(int n) {
+  switch (n) {
+    case 1: setColor(255, 0, 255); break;    // purple
+    case 2: setColor(0, 255, 0); break;      // green
+    case 3: setColor(0, 0, 255); break;      // blue
+    case 4: setColor(255, 0, 0); break;      // red
+    case 5: setColor(255, 255, 255); break;  // white
+  }
+}
+
+// Assumes a common-anode LED (LOW = on), which is why the values are inverted.
+// If your colors come out wrong (e.g. "off" lights up), remove the "255 -".
+void setColor(int r, int g, int b) {
+  digitalWrite(redpin, 255 - r);
+  digitalWrite(greenpin, 255 - g);
+  digitalWrite(bluepin, 255 - b);
+}
+
+void setColor2(int r, int g, int b) {
+  digitalWrite(red, 255 - r);
+  digitalWrite(green, 255 - g);
+  digitalWrite(blue, 255 - b);
+}
+
+void ledOff() {
+  setColor(0, 0, 0);
+}
+
+void ledOff2() {
+  setColor2(0, 0, 0);
+}
+
+// ---------- Movement ----------
+// Left servo: >1500 = forward. Right servo: <1500 = forward (mirrored).
+// To turn toward a side, slow down (or reverse) the wheel on that side.
+
+void botStraight() {
+  servoLeft.writeMicroseconds(1550);
+  servoRight.writeMicroseconds(1450);
+}
+
+void botLeft() {  // gentle left: slow the left wheel
+  servoLeft.writeMicroseconds(1515);
+  servoRight.writeMicroseconds(1450);
+}
+
+void botHardLeft() {  // sharp left: left wheel slightly backward
+  servoLeft.writeMicroseconds(1480);
+  servoRight.writeMicroseconds(1450);
+}
+
+void botRight() {  // gentle right: slow the right wheel
+  servoLeft.writeMicroseconds(1550);
+  servoRight.writeMicroseconds(1485);
+}
+
+void botHardRight() {  // sharp right: right wheel slightly backward
+  servoLeft.writeMicroseconds(1550);
+  servoRight.writeMicroseconds(1520);
+}
+
+void botStop() {
+  servoLeft.writeMicroseconds(1500);
+  servoRight.writeMicroseconds(1500);
+}
+
+void botDetach() {
+  servoLeft.detach();
+  servoRight.detach();
+}
+
+// ---------- Communication / display ----------
+
+// Sends our score as one character: '2' = 0 cards ... '7' = 5 cards
+void transmit_func(int count) {
+  Serial2.write((char)('2' + count));
+}
+
+void display(int results[]) {
+  String text = "[";
+  for (int i = 0; i < 5; i++) {
+    text += results[i];
+    if (i < 4) text += " ";
+  }
+  text += "]";
+  mySerial.write(12);  // clear screen, cursor to top left
+  delay(10);
+  mySerial.write(22);  // display on, no cursor, no blink
+  delay(10);
+  mySerial.print(text);  // print the array of results, in order of group
+}
+
+bool scoresFilled() {
+  for (int i = 0; i < 5; i++) {
+    if (results[i] < 0) return false;
+  }
+  return true;
+}
+
+
+// ---------- Celebration functions ----------
+
+// --- LIGHT SHOW ---
+void lightShow() {
+  int counter = 0;
+  while (counter < 5) {  //flash for 5 * 1.5 seconds
+    colorFlash();        //1.5 seconds
+    counter++;
+  }
+  ledOff();
+  ledOff2();
+}
+
+void colorFlash() {     //flash red green and blue
+  setColor(255, 0, 0);  //red
+  setColor2(255, 0, 0);
+  delay(FLASH_TIME);
+
+  setColor(0, 255, 0);  //green
+  setColor2(0, 255, 0);
+  delay(FLASH_TIME);
+
+  setColor(0, 0, 255);  //blue
+  setColor2(0, 0, 255);
+  delay(FLASH_TIME);
+}
+
+// --- DANCE ---
+void dance() {
+  int time = 200;
+  int counter = 0;
+  while (counter < 5) {
+    wiggle(time);
+    backforth(time);
+    counter++;
+  }
+  botDetach();
+}
+
+void wiggle(int t) {
+  botHardLeft();
+  delay(t);
+  botHardRight();
+  delay(t);
+}
+
+void backforth(int t) {
+  botStraight();
+  delay(t);
+  botBack();
+  delay(t);
+}
+
+// --- SONG: Twinkle Twinkle Little Star ---
+// Each note is three bytes sent to the LCD: duration, octave, note
+// Note codes: 220 = A, 223 = C, 225 = D, 227 = E, 228 = F, 230 = G
+
+#define TWINKLE_LEN 14
+
+const byte twinkleNotes[TWINKLE_LEN] = {
+  223, 223, 230, 230, 220, 220, 230,  // C C G G A A G
+  228, 228, 227, 227, 225, 225, 223,  // F F E E D D C
+};
+
+void playTwinkle() {
+  for (int k = 0; k < TWINKLE_LEN; k++) {
+    bool isLong = (k % 7 == 6);                       // last note of each line is held
+    byte dur = isLong ? 212 : 211;                    // quarter note : eighth note
+    byte oct = (twinkleNotes[k] == 220) ? 216 : 215;  // the LCD's octaves start at A, so A is one octave up
+
+    mySerial.write(dur);
+    mySerial.write(oct);
+    mySerial.write(twinkleNotes[k]);
+
+    delay(isLong ? 550 : 275);  // note length x 1.1 so each note finishes before the next
+  }
+}
