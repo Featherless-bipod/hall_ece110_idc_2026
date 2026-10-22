@@ -16,7 +16,7 @@
 #define ex_bluepin 2
 
 #define TxPin 14
-SoftwareSerial mySerial = SoftwareSerial(255, TxPin); 
+SoftwareSerial mySerial = SoftwareSerial(255, TxPin);
 
 //============================================= WEEK 2 CODE =========================================================
 
@@ -90,10 +90,10 @@ return 0;
 
 
 ///===================================================== WEEK 3 CODE ==========================================================
-int score_arr[5] = {-1,-1,-1,-1,-1}; 
+int score_arr[5] = {-1,-1,-1,-1,-1};
 
 void display(){
-  
+ 
   String text = "[";
   for (int i = 0; i < 5; i++){
     text += score_arr[i];
@@ -126,7 +126,7 @@ void read_xbee(){
   while (Serial2.available()){
     char incoming = Serial2.read();
     set_ex_RGB(255,255,255);
-    delay(250);
+    delay(500);
     set_ex_RGB(0,0,0);
     Serial.print("incoming: ");
     Serial.println((char)incoming);
@@ -151,33 +151,34 @@ servoRight.detach();
 void finish_state() {
   set_RGBi(255, 255, 255);
   scan_hall();
-
+  servoLeft.detach();
+  servoRight.detach();
   int error_status = report_values();
   delay(250);
   set_RGBi(0,0,0);
   Serial.println("Error status: ");
   Serial.println(error_status);
-  //servoLeft.detach();
-  //servoRight.detach();
   display();
   while(!scoresFilled()){
     read_xbee();
     display();
   }
 
-  if score_arr[4] == 5{
+  if (score_arr[4] == 5){
     playTwinkle();
   }
-  else if score_arr[4] >= 3{
+  else if(score_arr[score_arr[4]-1]>=3){
+    servoLeft.attach(12);
+    servoRight.attach(11);
     dance();
   }
   else{
     lightShow();
   }
   servoLeft.detach();
-  servoRight.detach(); 
+  servoRight.detach();
   while(true){
-    delay(1000); 
+    delay(1000);
   }
 }
 
@@ -370,31 +371,19 @@ return time;             // Return decay time
 // ---------- Celebration functions ----------
 
 // --- LIGHT SHOW ---
-void lightShow(int er, int eg, int eb, int ir, int ig,  int ib) {
-  void set_ex_RGB(int r, int g, int b) {
-    // Set RGB LED pins based on high=bright
-    digitalWrite(er, 0==r);
-    digitalWrite(eg, 0==g);
-    digitalWrite(eb, 0==b);
-  }
-  void set_RGBi(int r, int g, int b) {
-    // Set RGB LED pins based on low=bright (default)
-    analogWrite(ir, 255-r);
-    analogWrite(ig, 255-g);
-    analogWrite(ib, 255-b);
-  }
+void lightShow() {
   for (int i = 0; i < 5; i++) {  //flash for 5 * 1.5 seconds
     set_ex_RGB(255, 0, 0);  //red
     set_RGBi(255, 0, 0);
-    delay(100);
+    delay(500);
 
     set_ex_RGB(0, 255, 0);  //green
     set_RGBi(0, 255, 0);
-    delay(100);
+    delay(500);
 
     set_ex_RGB(0, 0, 255);  //blue
     set_RGBi(0, 0, 255);
-    delay(100);     //1.5 seconds
+    delay(500);     //1.5 seconds
   }
   set_ex_RGB(0, 0, 0);
   set_RGBi(0, 0, 0);
@@ -430,6 +419,7 @@ void playTwinkle() {
     223, 223, 230, 230, 220, 220, 230,  // C C G G A A G
     228, 228, 227, 227, 225, 225, 223,  // F F E E D D C
   };
+  for (int i =0; i<3;i++){
   for (int k = 0; k < 14; k++) {
     bool isLong = (k % 7 == 6);                       // last note of each line is held
     byte dur = isLong ? 212 : 211;                    // quarter note : eighth note
@@ -441,4 +431,6 @@ void playTwinkle() {
 
     delay(isLong ? 550 : 275);  // note length x 1.1 so each note finishes before the next
   }
+  }
 }
+
